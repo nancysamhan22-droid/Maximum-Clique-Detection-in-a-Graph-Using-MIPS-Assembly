@@ -1,0 +1,777 @@
+#Nancy Samhan 1230926
+#Lina Hamad 1231412
+################# Data segment #####################
+.data
+prompt_input_file:  .asciiz "Enter the input file path/name: "
+prompt_graph_size:  .asciiz "Enter graph size (2-5): "
+results_saved:      .asciiz "\nResults saved to output.txt\n"
+
+error_file:       .asciiz "\nError: File does not exist or cannot be opened!\n"
+error_invalid:    .asciiz "\nError: Invalid adjacency matrix! Requirements:\n- Square matrix (size x size values)\n- Only 0s and 1s\n- Symmetric matrix\n- Diagonal must be all 0s\n"
+error_size:       .asciiz "\nError: Invalid size! Must be between 2 and 5.\n"
+size_one_msg:     .asciiz "\nNo clique because: A clique requires at least 2 different vertices.\n"
+
+input_filename:   .space 256
+output_filename:  .asciiz "output.txt"
+temp:     .space 1 
+
+graph_msg: .asciiz "\nGraph has been built successfully!\n"
+noclique_msg: .asciiz "\nThe graph hasn't any clique sub graphs :(\n"
+Vertices_in_maxC:.asciiz "\nVertices in maximum clique :\n"
+
+size_msg: .asciiz "\nMaximum clique size: "
+Graph: .space 25 
+NotSelected: .space 5
+Selected: .space 5
+graph_size: .word 0
+max_vertices: .word 0 # size of allocated graph(real space that will take it from 25B)
+buffer: .space 100
+
+
+
+################# Code segment #####################
+.text
+.globl main
+
+
+main:
+    # Prompt for graph size(Print)
+    li $v0, 4
+    la $a0, prompt_graph_size 
+    syscall
+    
+    li $v0, 5
+    syscall
+    move $t0, $v0 # t0 is the size
+    
+    # Check if size is 1
+    beq $t0, 1, size_one_error
+    
+    # Validate size (2-5)
+    blt $t0, 2, size_error
+    bgt $t0, 5, size_error
+    
+    sw $t0, graph_size
+    mul $t1, $t0, $t0
+    sw $t1, max_vertices
+    
+    # Prompt for input filename
+    li $v0, 4 # print s
+    la $a0, prompt_input_file  
+    syscall
+    
+    li $v0, 8 # read the name/path of input file
+    la $a0, input_filename
+    li $a1, 256
+    syscall
+    
+    la $a0, input_filename
+    jal remove_newline     #BC when we click enter will take it as a line \n.
+    
+    la $t0, Graph
+    li $t1, 0
+    li $v0, 13 # Open File
+    la $a0, input_filename
+    li $a1, 0
+    li $a2, 0
+    syscall
+    move $s0, $v0          #$v0 (negative if error)
+    
+    bltz $s0, file_error
+  
+read_loop:
+    li $v0, 14             #Read from File
+    move $a0, $s0
+    la $a1, temp
+    li $a2, 1      
+    syscall
+
+    beq $v0, $zero, done    #end of file
+
+    lb $t4, temp
+    beq $t4, 10, skip #line
+    beq $t4, 13, skip #\r
+    beq $t4, 32, skip #space
+
+    addi $t4, $t4, -48 #ASCII of 1= 49,ASCII of 0 = 48
+    sb $t4, 0($t0)
+    
+    addi $t0, $t0, 1
+    addi $t1, $t1, 1
+    lw $t5, max_vertices
+    beq $t1, $t5, done
+
+skip:
+    j read_loop
+
+done:
+    li $v0, 16 # Close File
+    move $a0, $s0
+    syscall
+
+    lw $t5, max_vertices
+    bne $t1, $t5, validation_error #make sure that # of values from file = n*n
+
+    jal validate_graph
+    beqz $v0, validation_error
+
+    li $v0, 4
+    la $a0, graph_msg
+    syscall
+    
+    # Initialize Selected array
+    la $t0, Selected
+    li $t1, 0
+    lw $t2, graph_size
+init_selected:
+    beq $t1, $t2, init_done
+    sb $t1, 0($t0) 
+    addi $t0, $t0, 1
+    addi $t1, $t1, 1
+    j init_selected
+    
+init_done:
+    # Initialize NotSelected to -1
+    la $t0, NotSelected
+    li $t1, -1
+    li $t2, 0
+init_not_selected:
+    beq $t2, 5, init_not_done
+    sb $t1, 0($t0)
+    addi $t0, $t0, 1
+    addi $t2, $t2, 1
+    j init_not_selected
+    
+init_not_done:
+    lw $s1, graph_size
+    li $v1, 0
+   
+    jal checkIfclique   #for nxn graph
+   
+    beq $v1, 1, foundAC
+   
+    sub $s1, $s1, 1
+   
+begin_for:
+    blt $s1, 2, no_clique  
+    li $v1, 0
+    jal Generate_SubG
+    beq $v1, 1, foundAC  
+    sub $s1, $s1, 1
+    j begin_for
+   
+foundAC:
+    li $v0, 4 
+    la $a0, size_msg
+    syscall 
+
+    move $a0, $s1
+    li $v0, 1
+    syscall
+   
+    li $v0, 4 
+    la $a0, Vertices_in_maxC
+    syscall 
+ 
+    la $t0, Selected
+    li $t2, 0
+for_loopForVertices:
+    lb $t1, 0($t0)
+    beq $t1, -1, end_Vertices
+    beq $t2, $s1, end_Vertices
+    li $v0, 11
+    li $a0, 32 # space
+    syscall
+    
+    move $a0, $t1
+    li $v0, 1
+    syscall
+    addi $t0, $t0, 1
+    addi $t2, $t2, 1    
+    j for_loopForVertices
+   
+end_Vertices:
+    jal write_results
+    
+    li $v0, 4
+    la $a0, results_saved
+    syscall
+    
+    j endProgram
+    
+no_clique:
+    li $v0, 4
+    la $a0, noclique_msg
+    syscall
+    
+    jal write_results
+    
+    li $v0, 4
+    la $a0, results_saved
+    syscall
+       
+endProgram:  
+    li $v0, 10
+    syscall
+
+#-------------------------------------
+remove_newline:
+    move $t0, $a0 # move string that saved in a0.
+remove_loop:
+    lb $t1, 0($t0)
+    beqz $t1, remove_done
+    beq $t1, 10, remove_char      #ASCII for \n (new line)
+#    beq $t1, 13, remove_char      
+    addi $t0, $t0, 1
+    j remove_loop
+remove_char:
+    sb $zero, 0($t0)
+remove_done:
+    jr $ra
+
+#-------------------------------------
+size_one_error:
+    li $v0, 4
+    la $a0, size_one_msg
+    syscall
+    jal write_size_one_to_file
+    j endProgram
+
+#-------------------------------------
+size_error:
+    li $v0, 4
+    la $a0, error_size
+    syscall
+    j endProgram
+
+#-------------------------------------
+file_error:
+    li $v0, 4
+    la $a0, error_file
+    syscall
+    
+    jal write_error_to_file
+    j endProgram
+
+#-------------------------------------
+validation_error:
+    li $v0, 4
+    la $a0, error_invalid
+    syscall
+    
+    jal write_validation_error_to_file 
+    j endProgram
+
+#-------------------------------------
+validate_graph:
+    addi $sp, $sp, -4
+    sw $ra, 0($sp)
+    
+    la $t0, Graph
+    li $t1, 0
+    lw $t9, max_vertices
+check_binary:
+    beq $t1, $t9, check_diagonal
+    lb $t2, 0($t0)
+    blt $t2, 0, invalid_graph
+    bgt $t2, 1, invalid_graph
+    addi $t0, $t0, 1
+    addi $t1, $t1, 1
+    j check_binary
+    
+check_diagonal:
+    la $t0, Graph
+    li $t1, 0
+    lw $t8, graph_size
+check_diag_loop:
+    beq $t1, $t8, check_symmetry
+    mul $t2, $t1, $t8
+    add $t2, $t2, $t1
+    la $t3, Graph
+    add $t3, $t3, $t2
+    lb $t4, 0($t3)
+    bnez $t4, invalid_graph
+    addi $t1, $t1, 1
+    j check_diag_loop
+    
+check_symmetry:
+    li $t0, 0
+    lw $t8, graph_size
+sym_row_loop:
+    beq $t0, $t8, valid_graph
+    li $t1, 0
+sym_col_loop:
+    beq $t1, $t0, next_sym_col
+    bge $t1, $t8, next_sym_row
+    
+    mul $t2, $t0, $t8
+    add $t2, $t2, $t1
+    la $t3, Graph
+    add $t3, $t3, $t2
+    lb $t4, 0($t3)
+    
+    mul $t2, $t1, $t8
+    add $t2, $t2, $t0
+    la $t3, Graph
+    add $t3, $t3, $t2
+    lb $t5, 0($t3)
+    
+    bne $t4, $t5, invalid_graph
+    
+next_sym_col:
+    addi $t1, $t1, 1
+    j sym_col_loop
+    
+next_sym_row:
+    addi $t0, $t0, 1
+    j sym_row_loop
+    
+valid_graph:
+    li $v0, 1
+    j validate_done
+    
+invalid_graph:
+    li $v0, 0
+    
+validate_done:
+    lw $ra, 0($sp)
+    addi $sp, $sp, 4
+    jr $ra
+
+#-------------------------------------
+write_size_one_to_file:
+    addi $sp, $sp, -4
+    sw $ra, 0($sp)
+    
+    li $v0, 13
+    la $a0, output_filename
+    li $a1, 1
+    li $a2, 0
+    syscall
+    move $s7, $v0
+    
+    bltz $s7, size_one_done
+    
+    la $t0, size_one_msg
+    li $t1, 0
+count_size_one:
+    lb $t2, 0($t0)
+    beqz $t2, write_size_one
+    addi $t0, $t0, 1
+    addi $t1, $t1, 1
+    j count_size_one
+    
+write_size_one:
+    li $v0, 15
+    move $a0, $s7
+    la $a1, size_one_msg
+    move $a2, $t1
+    syscall
+    
+    li $v0, 16
+    move $a0, $s7
+    syscall
+    
+size_one_done:
+    lw $ra, 0($sp)
+    addi $sp, $sp, 4
+    jr $ra
+
+#-------------------------------------
+write_results:
+    addi $sp, $sp, -4
+    sw $ra, 0($sp)
+    
+    li $v0, 13
+    la $a0, output_filename
+    li $a1, 1
+    li $a2, 0
+    syscall
+    move $s7, $v0 #V0 (-) there is a problem in the file.
+    
+    bltz $s7, write_error
+    
+    blt $s1, 2, write_no_clique
+    
+    la $t0, buffer
+    la $t1, size_msg
+copy_size_msg:
+    lb $t2, 0($t1)
+    beqz $t2, size_msg_done
+    sb $t2, 0($t0)
+    addi $t0, $t0, 1
+    addi $t1, $t1, 1
+    j copy_size_msg
+    
+size_msg_done:
+    move $t3, $s1
+    addi $t3, $t3, 48
+    sb $t3, 0($t0)
+    addi $t0, $t0, 1
+    
+    li $t2, 10 #line
+    sb $t2, 0($t0)
+    addi $t0, $t0, 1
+    
+    la $t1, Vertices_in_maxC
+copy_vert_msg:
+    lb $t2, 0($t1)
+    beqz $t2, vert_msg_done
+    sb $t2, 0($t0)
+    addi $t0, $t0, 1
+    addi $t1, $t1, 1
+    j copy_vert_msg
+    
+vert_msg_done:
+    la $t1, Selected
+    li $t4, 0
+write_vertices:
+    beq $t4, $s1, vertices_done
+    lb $t3, 0($t1)
+    beq $t3, -1, vertices_done
+    
+    li $t2, 32
+    sb $t2, 0($t0)
+    addi $t0, $t0, 1
+    
+    addi $t3, $t3, 48
+    sb $t3, 0($t0)
+    addi $t0, $t0, 1
+    
+    addi $t1, $t1, 1
+    addi $t4, $t4, 1
+    j write_vertices
+    
+vertices_done:
+    li $t2, 10
+    sb $t2, 0($t0)
+    addi $t0, $t0, 1
+    
+    la $t2, buffer
+    sub $t3, $t0, $t2
+    
+    li $v0, 15       # Write to File
+    move $a0, $s7
+    la $a1, buffer
+    move $a2, $t3
+    syscall
+    
+    j close_output
+
+write_no_clique:
+    li $v0, 15
+    move $a0, $s7
+    la $a1, noclique_msg
+    li $a2, 44
+    syscall
+    
+close_output:
+    li $v0, 16
+    move $a0, $s7
+    syscall
+    
+write_error:
+    lw $ra, 0($sp)
+    addi $sp, $sp, 4
+    jr $ra
+
+#-------------------------------------
+write_error_to_file: #if fails in open input file.
+    addi $sp, $sp, -4
+    sw $ra, 0($sp)
+    
+    li $v0, 13
+    la $a0, output_filename
+    li $a1, 1
+    li $a2, 0
+    syscall
+    move $s7, $v0
+    
+    bltz $s7, error_writing_done
+    
+    # Calculate actual length of error_file message
+    la $t0, error_file
+    li $t1, 0
+count_error_len:
+    lb $t2, 0($t0)
+    beqz $t2, write_error_msg
+    addi $t0, $t0, 1
+    addi $t1, $t1, 1
+    j count_error_len
+    
+write_error_msg:
+    li $v0, 15
+    move $a0, $s7
+    la $a1, error_file
+    move $a2, $t1          # Use calculated length instead of 54
+    syscall
+    
+    li $v0, 16
+    move $a0, $s7
+    syscall
+    
+error_writing_done:
+    lw $ra, 0($sp)
+    addi $sp, $sp, 4
+    jr $ra
+
+#-------------------------------------
+write_validation_error_to_file:
+    addi $sp, $sp, -4
+    sw $ra, 0($sp)
+    
+    li $v0, 13
+    la $a0, output_filename
+    li $a1, 1
+    li $a2, 0
+    syscall
+    move $s7, $v0
+    
+    bltz $s7, validation_writing_done
+    
+    # Calculate actual length of error_invalid message
+    la $t0, error_invalid
+    li $t1, 0
+count_invalid_len:
+    lb $t2, 0($t0)
+    beqz $t2, write_invalid_msg
+    addi $t0, $t0, 1
+    addi $t1, $t1, 1
+    j count_invalid_len
+    
+write_invalid_msg:
+    li $v0, 15
+    move $a0, $s7
+    la $a1, error_invalid
+    move $a2, $t1          # Use calculated length instead of 120
+    syscall
+    
+    li $v0, 16
+    move $a0, $s7
+    syscall
+    
+validation_writing_done:
+    lw $ra, 0($sp)
+    addi $sp, $sp, 4
+    jr $ra
+ 
+##############---------------------------
+ 
+checkIfclique:
+    addi $sp, $sp, -32
+    sw $ra, 0($sp)
+    sw $s0, 4($sp)
+    sw $s1, 8($sp)
+    sw $s2, 12($sp)
+    sw $s3, 16($sp)
+    sw $t1, 20($sp)
+    sw $t2, 24($sp)
+    sw $s4, 28($sp)
+    
+    la $t7, NotSelected
+    lw $s4, graph_size
+    
+    lb $s0, 0($t7)
+    lb $s1, 1($t7)
+    lb $s2, 2($t7)
+  
+    li $v1, 0 
+    li $t0, 0
+              
+check_row_loop:
+    beq $t0, $s4, found_clique
+    beq $t0, $s0, skip_row_i
+    beq $t0, $s1, skip_row_i
+    beq $t0, $s2, skip_row_i     
+    
+    li $t1, 0
+    
+check_col_loop:
+    beq $t1, $s4, next_row
+    beq $t1, $s0, skip_col_j
+    beq $t1, $s1, skip_col_j 
+    beq $t1, $s2, skip_col_j
+    
+    beq $t0, $t1, skip_col_j
+    
+    mul $t2, $t0, $s4
+    add $t2, $t2, $t1
+    la $t3, Graph
+    add $t3, $t3, $t2
+   
+    lb $t4, 0($t3)
+    beqz $t4, not_a_clique 
+    
+skip_col_j:
+    addi $t1, $t1, 1
+    j check_col_loop
+    
+next_row:
+    addi $t0, $t0, 1
+    j check_row_loop
+    
+skip_row_i:
+    addi $t0, $t0, 1
+    j check_row_loop
+    
+found_clique:
+    li $v1, 1  
+    
+not_a_clique:
+    lw $ra, 0($sp)
+    lw $s0, 4($sp)
+    lw $s1, 8($sp)
+    lw $s2, 12($sp)
+    lw $s3, 16($sp)
+    lw $t1, 20($sp)
+    lw $t2, 24($sp)
+    lw $s4, 28($sp)
+    addi $sp, $sp, 32
+    jr $ra
+ 
+#-------------------------------------
+Generate_SubG:
+    addi $sp, $sp, -24
+    sw $ra, 0($sp)
+    sw $s5, 4($sp)
+    sw $s6, 8($sp)
+    sw $s7, 12($sp)
+    sw $s1, 16($sp)
+    sw $s2, 20($sp)
+    
+    lw $s5, graph_size
+    sub $s6, $s5, $s1 #s6 = num of untaken nodes
+    
+    li $t1, 1
+    li $s2, 1
+    lw $t9, graph_size
+    sllv $s2, $s2, $t9
+    
+for_out:
+    bge $t1, $s2, end_for_out
+    
+    move $t3, $t1 
+    li $t6, 0
+    
+    jal CountAndPick   
+    
+    bne $t6, $s6, nextCase
+    
+    jal selectedVertices
+    
+    jal checkIfclique  
+    
+    beq $v1, 1, end_for_out 
+    
+nextCase:    
+    addi $t1, $t1, 1
+    j for_out
+       
+end_for_out:
+    lw $ra, 0($sp)
+    lw $s5, 4($sp)
+    lw $s6, 8($sp)
+    lw $s7, 12($sp)
+    lw $s1, 16($sp)
+    lw $s2, 20($sp)
+    addi $sp, $sp, 24
+    jr $ra
+ 
+#-------------------------------------
+CountAndPick: 
+    addi $sp, $sp, -8
+    sw $t7, 0($sp)
+    sw $s3, 4($sp)
+    
+    li $t5, -1
+    la $a1, NotSelected
+    li $s3, 0
+clear_not_selected:
+    bge $s3, 5, clear_done
+    sb $t5, 0($a1)
+    addi $a1, $a1, 1
+    addi $s3, $s3, 1
+    j clear_not_selected
+    
+clear_done:
+    li $t6, 0
+    la $a1, NotSelected
+    lw $s3, graph_size
+    li $t4, 0
+    
+count_loop:
+    beq $t4, $s3, count_done
+    
+    li $t5, 1
+    sllv $t5, $t5, $t4
+    and $t5, $t3, $t5
+    beqz $t5, skip_bit
+    
+    sub $t7, $s3, $t4 # (MSB)0 1 2 3 4 (LSB) 
+    addi $t7, $t7, -1
+    sb $t7, 0($a1)
+    addi $a1, $a1, 1
+    addi $t6, $t6, 1
+    
+skip_bit:
+    addi $t4, $t4, 1
+    j count_loop
+    
+count_done:
+    lw $t7, 0($sp)
+    lw $s3, 4($sp)
+    addi $sp, $sp, 8
+    jr $ra
+ 
+#-------------------------------------
+selectedVertices:
+    addi $sp, $sp, -8
+    sw $t0, 0($sp)
+    sw $s3, 4($sp)
+    
+    la $t5, Selected
+    li $t7, -1
+    li $t0, 0
+    lw $s3, graph_size
+clear_selected:
+    bge $t0, $s3, clear_sel_done
+    sb $t7, 0($t5)
+    addi $t5, $t5, 1
+    addi $t0, $t0, 1
+    j clear_selected
+    
+clear_sel_done:
+    la $t4, NotSelected
+    la $t5, Selected
+    li $t6, 0  
+    li $t3, 0  
+
+loopVertices:
+    beq $t3, $s3, BYE
+    
+    la $t4, NotSelected
+    li $t7, 0
+    
+checkNotSelected:
+    bge $t7, $s3, addToSelected
+    lb $t2, 0($t4)
+    beq $t2, -1, addToSelected  
+    beq $t2, $t3, skipVertex  
+    addi $t4, $t4, 1
+    addi $t7, $t7, 1
+    j checkNotSelected
+
+addToSelected:
+    sb $t3, 0($t5)
+    addi $t5, $t5, 1
+    addi $t6, $t6, 1
+
+skipVertex:
+    addi $t3, $t3, 1
+    j loopVertices
+  
+BYE:
+    lw $t0, 0($sp)
+    lw $s3, 4($sp)
+    addi $sp, $sp, 8
+    jr $ra
